@@ -50,11 +50,11 @@ def idx_bam(bam, threads):
         pysam.index(bam)
     return bam
 
-def collect_bam_chunks(inpath, chrs, outpath, unmapped):
-    allpaths = [inpath+".tmp."+c+".bam" for c in chrs]
+def collect_bam_chunks(tmppath, chrs, outpath, unmapped):
+    allpaths = [tmppath+".tmp."+c+".bam" for c in chrs]
     if unmapped:
-        allpaths = [inpath+".tmp."+c+".bam" for c in chrs[:-1]]
-        allpaths.append(inpath+".tmp."+"unmapped"+".bam")
+        allpaths = [tmppath+".tmp."+c+".bam" for c in chrs[:-1]]
+        allpaths.append(tmppath+".tmp."+"unmapped"+".bam")
     cat_args = ['-o', outpath]+allpaths
     pysam.cat(*cat_args)
     x = [os.remove(f) for f in allpaths]
@@ -73,7 +73,7 @@ def count_ref_consuming_bases(cigartuples):
             bases = bases+cig[1]
     return bases
 
-def clean_bam(inpath, threads, fastapath, chr, strict, keepunmapped, keepsecondary, anonheader):
+def clean_bam(inpath, tmppath, threads, fastapath, chr, strict, keepunmapped, keepsecondary, anonheader):
     fa = pysam.FastaFile(fastapath)
 
     if chr == '*':
@@ -82,10 +82,10 @@ def clean_bam(inpath, threads, fastapath, chr, strict, keepunmapped, keepseconda
         chrlabel = chr
 
     #open in/out files
-    outpath = inpath+".tmp."+chrlabel+".bam"
-    tmppath = inpath+".tmp."+chrlabel+".tmp.bam"
+    outpath = tmppath+".tmp."+chrlabel+".bam"
+    tmppath2 = tmppath+".tmp."+chrlabel+".tmp.bam"
     inp = pysam.AlignmentFile(inpath, 'rb', threads = threads)
-    out = pysam.AlignmentFile(tmppath, 'wb', header = anonheader, threads = threads)
+    out = pysam.AlignmentFile(tmppath2, 'wb', header = anonheader, threads = threads)
     for read in inp.fetch(chr):
         # deal with unmapped reads
         if chrlabel == 'unmapped':
@@ -223,11 +223,11 @@ def clean_bam(inpath, threads, fastapath, chr, strict, keepunmapped, keepseconda
     except NameError:
         readtype = 'NA'
     if readtype == 'SE':
-        pysam.sort("-o", outpath, tmppath)
-        if os.path.exists(tmppath):
-            os.remove(tmppath)
+        pysam.sort("-o", outpath, tmppath2)
+        if os.path.exists(tmppath2):
+            os.remove(tmppath2)
     else:
-        os.rename(tmppath, outpath)
+        os.rename(tmppath2, outpath)
 
 
 def main():
@@ -252,6 +252,7 @@ def main():
     v = '0.5.0'
     print("BAMboozle.py v"+v)
     bampath = args.bam
+    tmppath = args.out + '.tmp'  
     try:
         fa = pysam.FastaFile(args.fa)
     except ValueError:
@@ -282,13 +283,13 @@ def main():
         n_jobs = args.p
 
     pool = mp.Pool(n_jobs)
-    results = [pool.apply_async(clean_bam, (args.bam,pysam_workers,args.fa,chr,args.strict,args.keepunmapped,args.keepsecondary,bamheader,  )) for chr in chrs]
+    results = [pool.apply_async(clean_bam, (args.bam, tmppath,pysam_workers,args.fa,chr,args.strict,args.keepunmapped,args.keepsecondary,bamheader,  )) for chr in chrs]
     x = [r.get() for r in results]
     #single threaded below:
     #[clean_bam(bampath,pysam_workers,args.fa,chr,args.strict) for chr in chrs]
 
     print("Creating final output .bam file...")
-    collect_bam_chunks(inpath = bampath, chrs = chrs, outpath = args.out, unmapped = args.keepunmapped)
+    collect_bam_chunks(tmppath = tmppath, chrs = chrs, outpath = args.out, unmapped = args.keepunmapped)
     print("Indexing final output .bam file...")
     y = idx_bam(args.out,args.p)
 
